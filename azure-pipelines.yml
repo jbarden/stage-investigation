@@ -8,9 +8,6 @@ trigger:
 pr:
   - master
 
-pool:
-  vmImage: 'windows-latest'
-
 variables:
 - group: DevConfig
   # Set the following variables in the 'DevConfig' variable group (creating if necessary). The name here and in ADO must match but can vary from the example here - please refer to the readMe for more details.
@@ -37,90 +34,116 @@ variables:
 - name: disable.coverage.autogenerate
   value: 'true' #see https://github.com/danielpalme/ReportGenerator/wiki/Integration#attention
 
-jobs:
-- job: Build
-  steps:
-    - task: DotNetCoreCLI@2
-      displayName: Restore NuGet packages
-      inputs:
-        command: 'restore'
-        projects: $(projectsToBuild)
-        feedsToUse: 'select'
-        includeNuGetOrg: true
-        vstsFeed: $(internalPackageFeedId)
-        verbosityRestore: 'Normal'
+stages:
+- stage: Build
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+      - task: DotNetCoreCLI@2
+        displayName: Restore NuGet packages
+        inputs:
+          command: 'restore'
+          projects: $(projectsToBuild)
+          feedsToUse: 'select'
+          includeNuGetOrg: true
+          vstsFeed: $(internalPackageFeedId)
+          verbosityRestore: 'Normal'
+      
+      - task: SonarSource.sonarqube.15B84CA1-B62F-4A2A-A403-89B77A063157.SonarQubePrepare@4
+        displayName: 'Prepare analysis on SonarQube'
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        inputs:
+          SonarQube: $(sonarQubeConnection)
+          projectKey: $(sonarQubeProjectKey)
+          projectName: $(sonarQubeProjectName)
+          projectVersion: '$(Build.BuildNumber)'
+      
+      - task: DotNetCoreCLI@2
+        displayName: dotnet build
+        inputs:
+          command: 'build'
+          projects: $(solutionFileToBuild)
+          arguments: '--nologo -c $(buildConfiguration)'
 
-    - task: SonarSource.sonarqube.15B84CA1-B62F-4A2A-A403-89B77A063157.SonarQubePrepare@4
-      displayName: 'Prepare analysis on SonarQube'
-      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
-      inputs:
-        SonarQube: $(sonarQubeConnection)
-        projectKey: $(sonarQubeProjectKey)
-        projectName: $(sonarQubeProjectName)
-        projectVersion: '$(Build.BuildNumber)'
+      - task: DotNetCoreCLI@2
+        displayName: dotnet publish
+        inputs:
+          command: 'publish'
+          projects: '$(projectsToBuild)'
+          publishWebProjects: false
+          arguments: '--nologo -c $(buildConfiguration) -o $(publishOutputDir)'
+          zipAfterPublish: false
 
-    - task: DotNetCoreCLI@2
-      displayName: dotnet build
-      inputs:
-        command: 'build'
-        projects: $(solutionFileToBuild)
-        arguments: '--nologo -c $(buildConfiguration)'
+      - task: DotNetCoreCLI@2
+        displayName: Run Unit Tests
+        continueOnError: false
+        inputs:
+          command: 'test'
+          projects: '$(testProjects)'
+          arguments: '--nologo -c $(buildConfiguration) --collect:"Code Coverage" /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:Exclude="[*Test]*'
+          publishTestResults: true
 
-    - task: DotNetCoreCLI@2
-      displayName: dotnet publish
-      inputs:
-        command: 'publish'
-        projects: '$(projectsToBuild)'
-        publishWebProjects: false
-        arguments: '--nologo -c $(buildConfiguration) -o $(publishOutputDir)'
-        zipAfterPublish: false
+      # The following requires the test project includes both coverlet.collector and coverlet.msbuild or the task will fail "No file created".
+      - task: reportgenerator@4
+        displayName: Generate Coverage Report
+        inputs:
+          reports: '$(Build.SourcesDirectory)/**/*.cobertura.xml'
+          targetdir: '$(codeCoverageReportDir)'
 
-    - task: DotNetCoreCLI@2
-      displayName: Run Unit Tests
-      continueOnError: false
-      inputs:
-        command: 'test'
-        projects: '$(testProjects)'
-        arguments: '--nologo -c $(buildConfiguration) --collect:"Code Coverage" /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:Exclude="[*Test]*'
-        publishTestResults: true
+      - task: PublishCodeCoverageResults@1
+        displayName: Publish Code Coverage
+        inputs:
+          codeCoverageTool: 'Cobertura'
+          summaryFileLocation: '$(codeCoverageReportDir)/Cobertura.xml'
+          reportDirectory: $(codeCoverageReportDir)
 
-    # The following requires the test project includes both coverlet.collector and coverlet.msbuild or the task will fail "No file created".
-    - task: reportgenerator@4
-      displayName: Generate Coverage Report
-      inputs:
-        reports: '$(Build.SourcesDirectory)/**/*.cobertura.xml'
-        targetdir: '$(codeCoverageReportDir)'
+      - task: SonarSource.sonarqube.6D01813A-9589-4B15-8491-8164AEB38055.SonarQubeAnalyze@4
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        displayName: 'Run SonarQube Code Analysis'
 
-    - task: PublishCodeCoverageResults@1
-      displayName: Publish Code Coverage
-      inputs:
-        codeCoverageTool: 'Cobertura'
-        summaryFileLocation: '$(codeCoverageReportDir)/Cobertura.xml'
-        reportDirectory: $(codeCoverageReportDir)
+      - task: SonarSource.sonarqube.291ed61f-1ee4-45d3-b1b0-bf822d9095ef.SonarQubePublish@4
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        displayName: Publish Results to SonarQube
+        inputs:
+          pollingTimeoutSec: '300'
 
-    - task: SonarSource.sonarqube.6D01813A-9589-4B15-8491-8164AEB38055.SonarQubeAnalyze@4
-      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
-      displayName: 'Run SonarQube Code Analysis'
+      - task: DotNetCoreCLI@2
+        displayName: 'dotnet pack $(buildConfiguration)'
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        inputs:
+          command: custom
+          projects: '**/*.csproj'
+          custom: pack
+          arguments: '/p:Configuration=$(buildConfiguration) --no-build --include-symbols --output $(Build.ArtifactStagingDirectory)  --verbosity Detailed -p:SymbolPackageFormat=snupkg'
 
-    - task: SonarSource.sonarqube.291ed61f-1ee4-45d3-b1b0-bf822d9095ef.SonarQubePublish@4
-      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
-      displayName: Publish Results to SonarQube
-      inputs:
-        pollingTimeoutSec: '300'
-
-    - task: DotNetCoreCLI@2
-      displayName: 'dotnet pack $(buildConfiguration)'
-      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
-      inputs:
-        command: custom
-        projects: '**/*.csproj'
-        custom: pack
-        arguments: '/p:Configuration=$(buildConfiguration) --no-build --include-symbols --output $(Build.ArtifactStagingDirectory)  --verbosity Detailed -p:SymbolPackageFormat=snupkg'
-
-    - task: PublishBuildArtifacts@1
-      displayName: Publish Build Artifacts for CI Build
-      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
-      inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-        ArtifactName: $(artifactName)
-        publishLocation: 'Container'
+      - task: PublishBuildArtifacts@1
+        displayName: Publish Build Artifacts for CI Build
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: $(artifactName)
+          publishLocation: 'Container'
+            
+- stage: Internal_Nuget
+  jobs:
+  - deployment: Internal_Nuget
+    displayName: Publish to Internal NuGet feed if we're running on master...
+    pool:
+      vmImage: 'windows-latest'
+    variables:
+      - group: DevConfig
+    environment: 'Internal NuGet Feed'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - task: DotNetCoreCLI@2
+              displayName: 'dotnet push'
+              condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+              inputs:
+                command: 'push'
+                packagesToPush: '$(Build.ArtifactStagingDirectory)/*.nupkg'
+                nuGetFeedType: 'internal'
+                publishVstsFeed: $(internalPackageFeedId)
