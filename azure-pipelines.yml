@@ -8,39 +8,39 @@ trigger:
 pr:
   - master
 
-pool:
-  vmImage: 'windows-latest'
-
-variables:
-- group: DevConfig
-  # Set the following variables in the 'DevConfig' variable group (creating if necessary). The name here and in ADO must match but can vary from the example here - please refer to the readMe for more details.
-  # internalPackageFeedId: 'The GUID for the Azure DevOps Package feed.'
-  # sonarQubeProjectName: 'The name of the SonarQube project.'
-  # sonarQubeProjectKey: 'The key to access the SonarQube project.'
-  # artifactName: 'The name for the created build artifact.'
-  # sonarQubeConnection: 'The name of the SonarQube Service connection.'
-  # The following are the defaults at the build level - please update if required
-- name: projectsToBuild
-  value: '**/*.csproj'
-- name: testProjects
-  value: '**/*Unit.Tests.csproj'
-- name: solutionFileToBuild
-  value: '**/*.sln'
-- name: platform
-  value: 'Any CPU'
-- name: buildConfiguration
-  value: 'Release'
-- name: publishOutputDir
-  value: $(Build.ArtifactStagingDirectory)
-- name: codeCoverageReportDir
-  value: $(Build.ArtifactStagingDirectory)/CoverageReport
-- name: disable.coverage.autogenerate
-  value: 'true' #see https://github.com/danielpalme/ReportGenerator/wiki/Integration#attention
 
 stages:
 - stage: Build
     jobs:
     - job: Build
+      pool:
+        vmImage: 'windows-latest'
+      variables:
+      - group: DevConfig
+        # Set the following variables in the 'DevConfig' variable group (creating if necessary). The name here and in ADO must match but can vary from the example here - please refer to the readMe for more details.
+        # internalPackageFeedId: 'The GUID for the Azure DevOps Package feed.'
+        # sonarQubeProjectName: 'The name of the SonarQube project.'
+        # sonarQubeProjectKey: 'The key to access the SonarQube project.'
+        # artifactName: 'The name for the created build artifact.'
+        # sonarQubeConnection: 'The name of the SonarQube Service connection.'
+        # The following are the defaults at the build level - please update if required
+      - name: projectsToBuild
+        value: '**/*.csproj'
+      - name: testProjects
+        value: '**/*Unit.Tests.csproj'
+      - name: solutionFileToBuild
+        value: '**/*.sln'
+      - name: platform
+        value: 'Any CPU'
+      - name: buildConfiguration
+        value: 'Release'
+      - name: publishOutputDir
+        value: $(Build.ArtifactStagingDirectory)
+      - name: codeCoverageReportDir
+        value: $(Build.ArtifactStagingDirectory)/CoverageReport
+      - name: disable.coverage.autogenerate
+        value: 'true' #see https://github.com/danielpalme/ReportGenerator/wiki/Integration#attention
+
       steps:
         - task: DotNetCoreCLI@2
           displayName: Restore NuGet packages
@@ -132,6 +132,8 @@ stages:
   - deployment: Internal_Nuget
     pool:
       vmImage: 'windows-latest'
+    variables:
+      - group: DevConfig
     environment: 'Internal NuGet Feed'
     strategy:
       runOnce:
