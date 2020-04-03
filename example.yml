@@ -1,33 +1,96 @@
 # https://mohitgoyal.co/2019/07/30/create-multi-stage-pipelines-with-yaml-in-azure-devops/
-
 stages:
-- stage: Build
+- stage: Build_Source_Code # Build Source Code for Dotnet Core Web App
   jobs:
   - job: Build
-    pool:
-      vmImage: 'Ubuntu-16.04'
+    pool: 'Hosted VS2017'
+    variables:
+      buildConfiguration: 'Release' 
+    continueOnError: false
+    steps:
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: build
+        arguments: '--configuration $(buildConfiguration)'
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: publish
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        modifyOutputPath: true
+        zipAfterPublish: true
+    - task: PublishBuildArtifacts@1
+      inputs:
+        path: $(Build.ArtifactStagingDirectory)
+        artifact: drop
+- stage: Run_Unit_tests # Run Unit tests in the Source code
+  jobs:
+  - job: Tests
+    pool: 'Hosted VS2017'
+    variables:
+      buildConfiguration: 'Release'
     continueOnError: true
     steps:
-    - script: echo "hello to my first Build"
-- stage: dev_deploy
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: test
+        projects: dotnetcore-tests        
+        arguments: '--configuration $(buildConfiguration) --logger trx'
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      inputs:
+        testRunner: VSTest
+        testResultsFiles: '**/*.trx'
+- stage: Deploy_In_Dev # Deploy artifacts to the dev environment
   jobs:
-  - deployment: dev_deploy
-    pool:
-      vmImage: 'Ubuntu-16.04'
-    environment: 'dev-hello'
+  - deployment: azure_web_app_dev
+    pool: 'Hosted VS2017'
+    variables:
+      WebAppName: 'multistage-yaml-dev'
+    environment: 'dev-environment'
     strategy:
       runOnce:
         deploy:
           steps:
-          - script: echo "hello, dev world !!!"
-- stage: qa_deploy
+          - task: AzureRMWebAppDeployment@4
+            displayName: Azure App Service Deploy
+            inputs:
+              WebAppKind: webApp
+              ConnectedServiceName: 'pay-as-you-go'
+              WebAppName: $(WebAppName)
+              Package: $(System.WorkFolder)/**/*.zip
+- stage: Deploy_In_QA # Deploy artifacts to the qa environment
   jobs:
-  - deployment: qa_deploy
-    pool:
-      vmImage: 'Ubuntu-16.04'
-    environment: 'qa-hello'
+  - deployment: azure_web_app_qa
+    pool: 'Hosted VS2017'
+    variables:
+      WebAppName: 'multistage-yaml-qa'
+    environment: 'qa-environment'
     strategy:
       runOnce:
         deploy:
           steps:
-          - script: echo "hello, qa world !!!"
+          - task: AzureRMWebAppDeployment@4
+            displayName: Azure App Service Deploy
+            inputs:
+              WebAppKind: webApp
+              ConnectedServiceName: 'pay-as-you-go'
+              WebAppName: $(WebAppName)
+              Package: $(System.WorkFolder)/**/*.zip
+- stage: Deploy_In_Prod # Deploy artifacts to the production environment
+  jobs:
+  - deployment: azure_web_app_prod
+    pool: 'Hosted VS2017'
+    variables:
+      WebAppName: 'multistage-yaml'
+    environment: 'prod-environment'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureRMWebAppDeployment@4
+            displayName: Azure App Service Deploy
+            inputs:
+              WebAppKind: webApp
+              ConnectedServiceName: 'pay-as-you-go'
+              WebAppName: $(WebAppName)
+              Package: $(System.WorkFolder)/**/*.zip
