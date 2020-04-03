@@ -28,7 +28,7 @@ variables:
   value: '**/*.sln'
 - name: platform
   value: 'Any CPU'
-- name: configuration
+- name: buildConfiguration
   value: 'Release'
 - name: publishOutputDir
   value: $(Build.ArtifactStagingDirectory)
@@ -64,7 +64,7 @@ jobs:
       inputs:
         command: 'build'
         projects: $(solutionFileToBuild)
-        arguments: '--nologo -c $(configuration)'
+        arguments: '--nologo -c $(buildConfiguration)'
 
     - task: DotNetCoreCLI@2
       displayName: dotnet publish
@@ -72,7 +72,7 @@ jobs:
         command: 'publish'
         projects: '$(projectsToBuild)'
         publishWebProjects: false
-        arguments: '--nologo -c $(configuration) -o $(publishOutputDir)'
+        arguments: '--nologo -c $(buildConfiguration) -o $(publishOutputDir)'
         zipAfterPublish: false
 
     - task: DotNetCoreCLI@2
@@ -81,7 +81,7 @@ jobs:
       inputs:
         command: 'test'
         projects: '$(testProjects)'
-        arguments: '--nologo -c $(configuration) --collect:"Code Coverage" /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:Exclude="[*Test]*'
+        arguments: '--nologo -c $(buildConfiguration) --collect:"Code Coverage" /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:Exclude="[*Test]*'
         publishTestResults: true
 
     # The following requires the test project includes both coverlet.collector and coverlet.msbuild or the task will fail "No file created".
@@ -107,6 +107,15 @@ jobs:
       displayName: Publish Results to SonarQube
       inputs:
         pollingTimeoutSec: '300'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'dotnet pack $(buildConfiguration)'
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+      inputs:
+        command: custom
+        projects: '**/*.csproj'
+        custom: pack
+        arguments: '/p:Configuration=$(buildConfiguration) --no-build --include-symbols --output $(Build.ArtifactStagingDirectory)  --verbosity Detailed -p:SymbolPackageFormat=snupkg'
 
     - task: PublishBuildArtifacts@1
       displayName: Publish Build Artifacts for CI Build
