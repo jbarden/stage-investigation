@@ -127,6 +127,7 @@ jobs:
 
     - task: DotNetCoreCLI@2
       displayName: 'dotnet push'
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
       inputs:
         command: 'push'
         packagesToPush: '$(Build.ArtifactStagingDirectory)/*.nupkg'
